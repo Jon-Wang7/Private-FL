@@ -183,3 +183,34 @@ class Client(object):
         gc.collect()
 
         return test_loss, test_accuracy
+
+    def train(self):
+        """训练模型"""
+        for round in range(self.n_rounds):
+            print(f"\nRound {round + 1}/{self.n_rounds}")
+            
+            # 获取优化器和调度器
+            optimizer, scheduler = self._get_optimizer(self.model)
+            
+            # 训练模型
+            self.model.train()
+            for epoch in range(self.n_epochs):
+                for batch_idx, (data, target) in enumerate(self.train_loader):
+                    optimizer.zero_grad()
+                    output = self.model(data)
+                    loss = self.criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    if batch_idx % 100 == 0:
+                        print(f"Epoch: {epoch + 1}/{self.n_epochs}, Batch: {batch_idx}, Loss: {loss.item():.4f}")
+                
+                # 更新学习率
+                if scheduler:
+                    scheduler.step()
+            
+            # 评估模型
+            self.evaluate()
+            
+            # 传输模型
+            self.transmit_model()

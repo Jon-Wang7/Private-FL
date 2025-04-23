@@ -208,14 +208,25 @@ def setup_and_train_fed():
                 model_config_["channels"],
                 model_config_["classes"],
             )
+            # 优化器配置
+            optim_config = {
+                "lr": 0.001
+            }
+            
+            # 学习率调度器配置
+            scheduler_config = {
+                "type": "CosineAnnealingLR",
+                "T_max": 30
+            }
             central_server = Server(
-                writer,
-                model_config_,
-                global_config,
-                data_config_,
-                init_config,
-                fed_config_,
-                optim_config,
+                writer=writer,
+                model_config=model_config_,
+                global_config=global_config,
+                data_config=data_config_,
+                init_config=init_config,
+                fed_config=fed_config_,
+                optim_config=optim_config,
+                scheduler_config=scheduler_config
             )
 
             central_server.setup()

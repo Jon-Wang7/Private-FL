@@ -183,49 +183,108 @@ class Qfnn(nn.Module):
         self.name = name
         self.device = device
         
-        # 基础参数设置
-        self.n_qubits = 2  # 固定使用2个量子比特
-        self.n_fuzzy_mem = 2  # 固定使用2个模糊记忆
-        self.max_batch_size = 32  # 固定批处理大小
+        # 从配置中获取参数
+        if config is not None:
+            self.n_qubits = config.get("n_qubits", 3)
+            self.n_fuzzy_mem = config.get("n_fuzzy_mem", 3)
+            hidden_layers = config.get("hidden_layers", [128, 64])
+            dropout = config.get("dropout", 0.3)
+        else:
+            self.n_qubits = 3
+            self.n_fuzzy_mem = 3
+            hidden_layers = [128, 64]
+            dropout = 0.3
         
-        # 初始化量子设备
+        self.max_batch_size = 32
+        
+        # 1. 增强特征提取层
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        
+        # 2. 初始化量子设备
         self.dev1 = qml.device('default.qubit', wires=self.n_qubits)
         
-        # 定义量子电路
+        # 3. 增强量子电路
         @qml.qnode(self.dev1, interface='torch', diff_method='backprop')
         def quantum_circuit(inputs, weights=None):
-            # 简化量子电路
+            # 量子态编码
             qml.AngleEmbedding(inputs, wires=range(self.n_qubits), rotation='Y')
+            
+            # 添加纠缠
             for i in range(self.n_qubits-1):
                 qml.CNOT(wires=[i, i+1])
+            qml.CNOT(wires=[self.n_qubits-1, 0])
+            
+            # 参数化旋转
+            if weights is not None:
+                for i in range(self.n_qubits):
+                    qml.RX(weights[0, i], wires=i)
+                    qml.RZ(weights[1, i], wires=i)
+                    qml.RX(weights[2, i], wires=i)
+            
+            # 添加额外纠缠
+            for i in range(self.n_qubits-1):
+                qml.CNOT(wires=[i, i+1])
+            
             return [qml.expval(qml.PauliZ(i)) for i in range(self.n_qubits)]
         
-        # 定义权重形状
-        self.weight_shapes = {"weights": (1, 1)}
+        # 4. 定义权重形状
+        self.weight_shapes = {"weights": (3, self.n_qubits)}
         
-        # 定义网络层
-        self.linear = nn.Linear(in_channels * 28 * 28, self.n_qubits)
-        self.dropout = nn.Dropout(0.5)
+        # 5. 定义网络层
+        self.linear = nn.Linear(128 * 3 * 3, self.n_qubits)
+        self.gn = nn.GroupNorm(1, self.n_qubits)
+        self.dropout = nn.Dropout(dropout)
+        
+        # 6. 模糊化参数
         self.m = nn.Parameter(torch.randn(self.n_qubits, self.n_fuzzy_mem))
         self.theta = nn.Parameter(torch.randn(self.n_qubits, self.n_fuzzy_mem))
         
-        # 计算量子输出的特征数
+        # 7. 计算特征数
         self.quantum_features = self.n_qubits * (self.n_fuzzy_mem ** self.n_qubits)
-        self.softmax_linear = nn.Linear(self.quantum_features, num_classes)
         
-        self.gn = nn.GroupNorm(1, self.n_qubits)
+        # 8. 增强中间层
+        self.hidden = nn.Sequential(
+            nn.Linear(self.quantum_features, hidden_layers[0]),
+            nn.BatchNorm1d(hidden_layers[0]),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_layers[0], hidden_layers[1]),
+            nn.BatchNorm1d(hidden_layers[1]),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
         
-        # 初始化量子层
+        # 9. 分类层
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_layers[-1], num_classes),
+            nn.Softmax(dim=1)
+        )
+        
+        # 10. 初始化量子层
         self.qlayer = qml.qnn.TorchLayer(quantum_circuit, self.weight_shapes)
         
-        # 初始化权重
+        # 11. 初始化权重
         self.apply(weights_init)
     
     def forward(self, x):
-        # 将图像展平
+        # 1. 特征提取
+        x = self.feature_extractor(x)
         x = x.view(x.size(0), -1)
         
-        # 分批处理
+        # 2. 分批处理
         batch_size = x.size(0)
         if batch_size > self.max_batch_size:
             outputs = []
@@ -234,27 +293,32 @@ class Qfnn(nn.Module):
                 batch_x = x[i:end]
                 batch_output = self._process_batch(batch_x)
                 outputs.append(batch_output)
-            return torch.cat(outputs, dim=0)
+            x = torch.cat(outputs, dim=0)
         else:
-            return self._process_batch(x)
+            x = self._process_batch(x)
+        
+        # 3. 中间层
+        x = self.hidden(x)
+        
+        # 4. 分类
+        x = self.classifier(x)
+        return x
     
     def _process_batch(self, x):
-        """处理单个批次的数据"""
-        # 线性变换
+        # 1. 线性变换
         x = self.linear(x)
         x = self.gn(x)
+        x = self.dropout(x)
         
-        # 模糊化处理
-        fuzzy_list0 = torch.zeros_like(x).to(self.device)
-        fuzzy_list1 = torch.zeros_like(x).to(self.device)
+        # 2. 模糊化处理
+        fuzzy_list = []
+        for i in range(self.n_fuzzy_mem):
+            diff = x.unsqueeze(2) - self.m.t()
+            exp_term = torch.exp(-0.5 * (diff / self.theta.t())**2)
+            fuzzy = exp_term.mean(dim=2)
+            fuzzy_list.append(fuzzy)
         
-        for i in range(x.shape[1]):
-            a = (-(x[:,i]-self.m[i,0])**2)/(2*self.theta[i,0]**2)
-            b = (-(x[:,i]-self.m[i,1])**2)/(2*self.theta[i,1]**2)
-            fuzzy_list0[:,i] = torch.exp(a)
-            fuzzy_list1[:,i] = torch.exp(b)
-
-        # 量子计算
+        # 3. 量子计算
         q_in = torch.zeros_like(x).to(self.device)
         q_out = []
         
@@ -264,8 +328,8 @@ class Qfnn(nn.Module):
                 loc = [0]*(self.n_qubits-len(loc)) + loc
             for j in range(self.n_qubits):
                 q_in = q_in.clone()
-                q_in[:,j] = fuzzy_list0[:,j] if int(loc[j]) == 0 else fuzzy_list1[:,j]
-
+                q_in[:,j] = fuzzy_list[int(loc[j])][:,j]
+            
             # 量子电路处理
             sq = torch.sqrt(q_in+1e-16)
             sq = torch.clamp(sq, -0.99999, 0.99999) 
@@ -276,13 +340,11 @@ class Qfnn(nn.Module):
                 Q_out = Q_out.unsqueeze(0)
             q_out.append(Q_out)
         
-        # 合并量子输出
+        # 4. 合并输出
         out = torch.cat(q_out, dim=1)
         
-        # 确保输出维度正确
+        # 5. 确保维度正确
         if out.shape[1] != self.quantum_features:
             out = out.view(out.shape[0], -1)
         
-        # 最终分类
-        out = self.softmax_linear(out)
         return out

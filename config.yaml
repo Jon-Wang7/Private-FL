@@ -13,16 +13,19 @@ data_config:
   mgn: 3 # Max grad norm for the Privacy Engine
 ---
 fed_config:
-  C: 1.0 # fraction
-  K: [2] # num_clients, accepts a list as in [2, 8, 12, 32]
-  R: 20 # num_rounds
-  E: 15 # local_epochs
-  B: 32 # 减小批处理大小
+  C: 0.8
+  K: [2]
+  R: 30
+  E: 10
+  B: 32
   criterion: torch.nn.CrossEntropyLoss
   optimizer: torch.optim.Adam
 ---
 optim_config:
-  lr: 0.01
+  lr: 0.0005
+  scheduler:
+    type: "CosineAnnealingLR"
+    T_max: 15
 ---
 init_config:
   init_type: "normal"
@@ -30,23 +33,22 @@ init_config:
   gpu_ids: [0]
 ---
 model_config:
-  name: Qfnn  # 使用量子模糊神经网络
+  name: Qfnn
   channels: [3, 1, 3]
   classes: [8, 11, 9]
-  # Qfnn特定配置
   n_qubits: 3
-  n_fuzzy_mem: 2
-  defuzz_qubits: 3
-  defuzz_layer: 2
+  n_fuzzy_mem: 3
+  hidden_layers: [128, 64]
+  dropout: 0.3
 ---
 log_config:
   log_path: "./log_meaningful_name/"
-  log_name:  "FL.log"
+  log_name: "FL.log"
   tb_port: 5252
   tb_host: "0.0.0.0"
 ---
 traditional_config:
-  R: 100 # num_rounds
-  B: 32 # 减小批处理大小
+  R: 100
+  B: 32
   criterion: torch.nn.CrossEntropyLoss
   optimizer: torch.optim.Adam

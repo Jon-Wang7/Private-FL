@@ -31,6 +31,7 @@ class Server(object):
         init_config: kwargs for the initialization of the model.
         fed_config: Kwargs for federated average algorithm.
         optim_config: Kwargs provided for optimizer.
+        scheduler_config: Kwargs provided for scheduler.
     """
 
     def __init__(
@@ -42,6 +43,7 @@ class Server(object):
         init_config={},
         fed_config={},
         optim_config={},
+        scheduler_config={}
     ):
         self.dataloader = None
         self.test_data = None
@@ -56,8 +58,8 @@ class Server(object):
             qfnn_config = {
                 "n_qubits": model_config.pop("n_qubits"),
                 "n_fuzzy_mem": model_config.pop("n_fuzzy_mem"),
-                "defuzz_qubits": model_config.pop("defuzz_qubits"),
-                "defuzz_layer": model_config.pop("defuzz_layer")
+                "hidden_layers": model_config.pop("hidden_layers"),
+                "dropout": model_config.pop("dropout")
             }
             self.model = eval(model_config["name"])(**model_config, config=qfnn_config)
         else:
@@ -89,6 +91,7 @@ class Server(object):
         self.criterion = fed_config["criterion"]
         self.optimizer = fed_config["optimizer"]
         self.optim_config = optim_config
+        self.scheduler_config = scheduler_config
         self.accuracies = []
         self.losses = []
 
@@ -500,3 +503,45 @@ class Server(object):
             gc.collect()
 
         self.transmit_model()
+
+    def _get_optimizer(self, model):
+        """获取优化器"""
+        optimizer = eval(self.optimizer)(model.parameters(), **self.optim_config)
+        
+        # 初始化调度器
+        if self.scheduler_config:
+            scheduler_type = self.scheduler_config.pop("type")
+            scheduler = eval(scheduler_type)(optimizer, **self.scheduler_config)
+            return optimizer, scheduler
+        return optimizer, None
+
+    def train(self):
+        """训练模型"""
+        for round in range(self.num_rounds):
+            print(f"\nRound {round + 1}/{self.num_rounds}")
+            
+            # 获取优化器和调度器
+            optimizer, scheduler = self._get_optimizer(self.model)
+            
+            # 训练模型
+            self.model.train()
+            for epoch in range(self.local_epochs):
+                for batch_idx, (data, target) in enumerate(self.dataloader):
+                    optimizer.zero_grad()
+                    output = self.model(data)
+                    loss = self.criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    if batch_idx % 100 == 0:
+                        print(f"Epoch: {epoch + 1}/{self.local_epochs}, Batch: {batch_idx}, Loss: {loss.item():.4f}")
+                
+                # 更新学习率
+                if scheduler:
+                    scheduler.step()
+            
+            # 评估模型
+            self.evaluate()
+            
+            # 传输模型
+            self.transmit_model()
