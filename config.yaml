@@ -1,6 +1,6 @@
 global_config:
   seed: 1441
-  device: "cuda"
+  device: cpu
   is_mp: True
   is_dp: False # is differential private
   save_cm: False
@@ -15,14 +15,14 @@ data_config:
 fed_config:
   C: 1.0 # fraction
   K: [2] # num_clients, accepts a list as in [2, 8, 12, 32]
-  R: 1 # num_rounds
-  E: 1 # local_epochs
-  B: 64 # batch_size
+  R: 20 # num_rounds
+  E: 15 # local_epochs
+  B: 32 # 减小批处理大小
   criterion: torch.nn.CrossEntropyLoss
   optimizer: torch.optim.Adam
 ---
 optim_config:
-  lr: 0.001
+  lr: 0.01
 ---
 init_config:
   init_type: "normal"
@@ -30,9 +30,14 @@ init_config:
   gpu_ids: [0]
 ---
 model_config:
-  name: CustomResNet
+  name: Qfnn  # 使用量子模糊神经网络
   channels: [3, 1, 3]
   classes: [8, 11, 9]
+  # Qfnn特定配置
+  n_qubits: 3
+  n_fuzzy_mem: 2
+  defuzz_qubits: 3
+  defuzz_layer: 2
 ---
 log_config:
   log_path: "./log_meaningful_name/"
@@ -42,6 +47,6 @@ log_config:
 ---
 traditional_config:
   R: 100 # num_rounds
-  B: 64 # batch_size
+  B: 32 # 减小批处理大小
   criterion: torch.nn.CrossEntropyLoss
   optimizer: torch.optim.Adam

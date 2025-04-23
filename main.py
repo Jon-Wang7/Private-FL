@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
 from src.server import Server
-from src.traditional_server import TraditionalServer
+# from src.traditional_server import TraditionalServer
 from src.utils import launch_tensor_board
 
 import os

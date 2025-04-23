@@ -81,12 +81,14 @@ def init_net(model, init_type, init_gain, gpu_ids):
         An initialized torch.nn.Module instance.
     """
     if len(gpu_ids) > 0:
-        assert (
-            torch.cuda.is_available()
-        ), ("CUDA is not available. Make sure your system has a compatible GPU and that you have "
-            "installed the necessary CUDA drivers and PyTorch with GPU support.")
-        model.to(gpu_ids[0])
-        model = nn.DataParallel(model, gpu_ids)
+        if torch.cuda.is_available():
+            model.to(gpu_ids[0])
+            model = nn.DataParallel(model, gpu_ids)
+        elif torch.backends.mps.is_available():
+            print("[INFO] Using MPS device. Skipping CUDA check.")
+            model.to("mps")
+        else:
+            raise EnvironmentError("Neither CUDA nor MPS is available. Please check your PyTorch installation.")
     init_weights(model, init_type, init_gain)
     return model
 

@@ -50,7 +50,19 @@ class Server(object):
         self._round = 0
         self.writer = writer
 
-        self.model = eval(model_config["name"])(**model_config)
+        # 处理模型初始化参数
+        if model_config["name"] == "Qfnn":
+            # 对于Qfnn，需要单独处理量子相关参数
+            qfnn_config = {
+                "n_qubits": model_config.pop("n_qubits"),
+                "n_fuzzy_mem": model_config.pop("n_fuzzy_mem"),
+                "defuzz_qubits": model_config.pop("defuzz_qubits"),
+                "defuzz_layer": model_config.pop("defuzz_layer")
+            }
+            self.model = eval(model_config["name"])(**model_config, config=qfnn_config)
+        else:
+            # 对于其他模型，保持原有逻辑
+            self.model = eval(model_config["name"])(**model_config)
 
         self.seed: int = global_config["seed"]
         # Training machine indicator (e.g. "cpu", "cuda").
@@ -292,7 +304,7 @@ class Server(object):
         gc.collect()
 
         for idx in sampled_client_indices:
-            self.clients[idx].client_evaluate(self._round)
+            self.clients[idx].client_evaluate()
 
         message = (f"[Round: {str(self._round).zfill(4)}] "
                    f"Finished evaluation of {str(len(sampled_client_indices))} selected clients!")
